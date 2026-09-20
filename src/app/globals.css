@@ -424,7 +424,7 @@ button:disabled {
   flex: 1;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 12px 15px 15px;
+  padding: 4px 15px 15px;
   cursor: pointer;
 }
 
@@ -434,13 +434,13 @@ button:disabled {
   border: 1px solid var(--border);
   background: #101014;
   border-radius: 5px;
-  margin-top: 6px;
+  margin-top: 0;
   cursor: pointer;
 }
 
 .playhead {
   position: absolute;
-  top: -18px;
+  top: -25px;
   bottom: 0;
   width: 1px;
   background: var(--accent);
@@ -461,7 +461,7 @@ button:disabled {
 
 .timeline-clip {
   position: absolute;
-  top: 9px;
+  top: 0;
   height: 76px;
   min-width: 55px;
   border: 1px solid #34343d;
