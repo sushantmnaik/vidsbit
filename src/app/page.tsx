@@ -20,10 +20,13 @@ import ExportDialog from "@/components/editor/ExportDialog";
 import ProjectManager from "@/components/editor/ProjectManager";
 
 import {
-  EditorState,
   exportVideo,
   ExportStage,
 } from "@/lib/exportVideo";
+
+import {
+  EditorState,
+} from "@/types/editor";
 
 import {
   createProject,

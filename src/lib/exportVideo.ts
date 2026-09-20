@@ -191,9 +191,13 @@ export async function exportVideo(
     .filter(
       (
         item,
-      ): item is MediaFile =>
-        Boolean(item) &&
-        item.type === "video",
+      ): item is MediaFile => {
+        if (!item) {
+          return false;
+        }
+
+        return item.type === "video";
+      },
     );
 
   const uniqueMedia = Array.from(
@@ -211,6 +215,12 @@ export async function exportVideo(
     index++
   ) {
     const item = uniqueMedia[index];
+
+    if (!item) {
+      throw new Error(
+        "One of the media files is missing during export preparation.",
+      );
+    }
 
     const filename =
       `source_${index}.mp4`;
