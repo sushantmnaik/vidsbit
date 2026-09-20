@@ -470,6 +470,7 @@ button:disabled {
   overflow: hidden;
   cursor: pointer;
   transition: border-color 0.15s;
+  margin-top: 25px;
 }
 
 .timeline-clip:hover {
