@@ -424,7 +424,8 @@ button:disabled {
   flex: 1;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 35px 15px 15px;
+  padding: 12px 15px 15px;
+  cursor: pointer;
 }
 
 .timeline-track {
@@ -433,11 +434,13 @@ button:disabled {
   border: 1px solid var(--border);
   background: #101014;
   border-radius: 5px;
+  margin-top: 6px;
+  cursor: pointer;
 }
 
 .playhead {
   position: absolute;
-  top: -32px;
+  top: -18px;
   bottom: 0;
   width: 1px;
   background: var(--accent);
