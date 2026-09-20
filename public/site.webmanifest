@@ -1,1 +1,22 @@
-{"name":"","short_name":"","icons":[{"src":"/android-chrome-192x192.png","sizes":"192x192","type":"image/png"},{"src":"/android-chrome-512x512.png","sizes":"512x512","type":"image/png"}],"theme_color":"#ffffff","background_color":"#ffffff","display":"standalone"}
+{
+  "name": "VIDSBIT",
+  "short_name": "VIDSBIT",
+  "description": "A free, local-first browser video editor for trimming, arranging, and exporting clips without subscriptions or watermarks.",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#09090b",
+  "background_color": "#09090b",
+  "display": "standalone",
+  "start_url": "/",
+  "scope": "/"
+}

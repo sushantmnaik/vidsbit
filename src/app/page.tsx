@@ -1812,9 +1812,9 @@ const handleTrimStart =
    */
 
   return (
-    <main className="editor-app">
+    <main className="editor-app" aria-label="VIDSBIT video editor app">
       <header className="topbar">
-        <div className="brand">
+        <div className="brand" aria-label="VIDSBIT brand">
           <div className="brand-mark">
             <img
               src="/android-chrome-192x192.png"
