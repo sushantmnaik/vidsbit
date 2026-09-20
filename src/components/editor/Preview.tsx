@@ -68,7 +68,9 @@ export default function Preview({
     return (
       <section className="preview-area">
         <div className="preview-empty">
-          <div className="preview-logo">VIDSBIT</div>
+          <div className="preview-logo">
+            <img src="/android-chrome-192x192.png" alt="VIDSBIT logo" />
+          </div>
           <p>Add a video to the timeline to begin</p>
         </div>
       </section>

@@ -1816,7 +1816,10 @@ const handleTrimStart =
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">
-            V
+            <img
+              src="/android-chrome-192x192.png"
+              alt="VIDSBIT logo"
+            />
           </div>
 
           <div>
