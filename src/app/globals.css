@@ -40,6 +40,14 @@ button:disabled {
   background: var(--bg);
 }
 
+.editor-workspace {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
 .topbar {
   height: 58px;
   border-bottom: 1px solid var(--border);
