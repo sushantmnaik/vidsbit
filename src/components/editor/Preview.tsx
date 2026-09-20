@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MediaFile, TimelineClip } from "@/types/editor";
 
 interface PreviewProps {
@@ -21,10 +21,49 @@ export default function Preview({
   onTogglePlay,
 }: PreviewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [isMuted, setIsMuted] = useState(false);
 
   const selectedMedia = activeClip
     ? media.find((item) => item.id === activeClip.mediaId)
     : null;
+
+  const seekBy = (seconds: number) => {
+    const video = videoRef.current;
+
+    if (!video || !activeClip) return;
+
+    const nextTime = Math.min(
+      activeClip.sourceEnd,
+      Math.max(activeClip.sourceStart, video.currentTime + seconds),
+    );
+
+    video.currentTime = nextTime;
+  };
+
+  const toggleMute = () => {
+    const video = videoRef.current;
+
+    if (!video) return;
+
+    video.muted = !video.muted;
+    setIsMuted(video.muted);
+  };
+
+  const toggleFullScreen = async () => {
+    const video = videoRef.current;
+
+    if (!video) return;
+
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await video.requestFullscreen();
+      }
+    } catch {
+      // Ignore browser fullscreen issues silently.
+    }
+  };
 
   useEffect(() => {
     const video = videoRef.current;
@@ -37,6 +76,8 @@ export default function Preview({
       video.currentTime = targetTime;
     }
 
+    video.muted = isMuted;
+
     if (isPlaying) {
       video.play().catch(() => {
         // Browser may block autoplay until the user interacts once.
@@ -44,7 +85,7 @@ export default function Preview({
     } else {
       video.pause();
     }
-  }, [activeClip, selectedMedia, isPlaying]);
+  }, [activeClip, selectedMedia, isPlaying, isMuted]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -115,6 +156,38 @@ export default function Preview({
           aria-label={isPlaying ? "Pause" : "Play"}
         >
           {isPlaying ? "❚❚" : "▶"}
+        </button>
+
+        <button
+          className="preview-control-button"
+          onClick={() => seekBy(-5)}
+          aria-label="Skip back 5 seconds"
+        >
+          −5s
+        </button>
+
+        <button
+          className="preview-control-button"
+          onClick={() => seekBy(5)}
+          aria-label="Skip forward 5 seconds"
+        >
+          +5s
+        </button>
+
+        <button
+          className="preview-control-button"
+          onClick={toggleMute}
+          aria-label={isMuted ? "Unmute" : "Mute"}
+        >
+          {isMuted ? "🔇" : "🔊"}
+        </button>
+
+        <button
+          className="preview-control-button"
+          onClick={toggleFullScreen}
+          aria-label="Toggle fullscreen"
+        >
+          ⛶
         </button>
 
         <div className="preview-current-time">

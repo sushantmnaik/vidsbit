@@ -529,18 +529,82 @@ button:disabled {
   border-top: 1px solid var(--border);
 }
 
-@media (max-width: 800px) {
-  .media-panel {
-    width: 220px;
+@media (max-width: 900px) {
+  .editor-workspace {
+    flex-direction: column;
   }
 
-  .timeline-actions button {
-    font-size: 10px;
-    padding: 5px 6px;
+  .media-panel {
+    width: 100%;
+    min-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .timeline-panel {
+    height: auto;
+    min-height: 250px;
+  }
+
+  .timeline-toolbar {
+    height: auto;
+    min-height: 54px;
+    padding: 10px 15px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .timeline-actions {
+    flex-wrap: wrap;
+    justify-content: center;
   }
 
   .preview-area {
     min-height: 350px;
+  }
+
+  .preview-controls {
+    width: min(100%, 760px);
+  }
+}
+
+@media (max-width: 600px) {
+  .topbar {
+    height: auto;
+    min-height: 58px;
+    padding: 10px 12px;
+    flex-wrap: wrap;
+  }
+
+  .brand {
+    min-width: 0;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .panel-header {
+    padding: 12px;
+  }
+
+  .preview-area {
+    padding: 10px 12px 6px;
+  }
+
+  .preview-frame {
+    width: 100%;
+    max-height: calc(100vh - 430px);
+  }
+
+  .play-button,
+  .preview-control-button {
+    flex: 1 1 auto;
+  }
+
+  .preview-current-time {
+    margin-left: 0;
   }
 }
 
@@ -548,22 +612,31 @@ button:disabled {
   width: min(760px, 75vw);
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
   padding-top: 6px;
   min-height: 30px;
 }
 
-.play-button {
-  width: 34px;
+.play-button,
+.preview-control-button {
   height: 30px;
   border: 1px solid var(--border);
   background: #151519;
   color: var(--text);
   border-radius: 6px;
   cursor: pointer;
+  padding: 0 10px;
+  font-size: 11px;
 }
 
-.play-button:hover {
+.play-button {
+  width: 34px;
+  padding: 0;
+}
+
+.play-button:hover,
+.preview-control-button:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -572,6 +645,7 @@ button:disabled {
   color: var(--accent);
   font-size: 11px;
   min-width: 42px;
+  margin-left: auto;
 }
 
 .preview-clip-name {
@@ -580,6 +654,7 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 100%;
 }
 
 .timeline-title {
