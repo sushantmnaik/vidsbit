@@ -93,9 +93,7 @@ export default function ExportDialog({
             </p>
 
             <span className="export-note">
-              Keep this tab open
-              until the export
-              finishes.
+              ⚡ Ultrafast local processing • Keep this tab open until export finishes.
             </span>
           </div>
         ) : (

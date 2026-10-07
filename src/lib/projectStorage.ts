@@ -1,7 +1,10 @@
+import JSZip from "jszip";
 import {
   EditorState,
   MediaFile,
   TimelineClip,
+  hydrateClip,
+  hydrateEditorState,
 } from "@/types/editor";
 
 const DB_NAME = "vidsbit-db";
@@ -538,9 +541,11 @@ export async function loadProject(
         file: item.file,
 
         url:
-          URL.createObjectURL(
-            item.file,
-          ),
+          item.file
+            ? URL.createObjectURL(
+                item.file,
+              )
+            : null,
 
         duration:
           item.duration,
@@ -550,6 +555,15 @@ export async function loadProject(
 
         height:
           item.height,
+
+        missing: !item.file,
+
+        reference: {
+          fileName: item.name,
+          size: item.file?.size ?? 0,
+          lastModified: item.file?.lastModified ?? 0,
+          mimeType: item.file?.type ?? "",
+        },
       }),
     );
 
@@ -562,10 +576,12 @@ export async function loadProject(
       ? project.selectedClipId
       : null;
 
-  return {
+  return hydrateEditorState({
     media,
     clips:
-      project.clips,
+      project.clips.map((clip) =>
+        hydrateClip(clip),
+      ),
     selectedClipId,
     currentTime:
       Number.isFinite(
@@ -573,7 +589,7 @@ export async function loadProject(
       )
         ? project.currentTime
         : 0,
-  };
+  });
 }
 
 export async function saveProject(
@@ -607,8 +623,15 @@ export async function saveProject(
   }
 
   const storedMedia: StoredMediaFile[] =
-    state.media.map(
-      (item) => ({
+    state.media
+      .filter(
+        (
+          item,
+        ): item is MediaFile & {
+          file: File;
+        } => Boolean(item.file),
+      )
+      .map((item) => ({
         id: item.id,
         name: item.name,
         type: item.type,
@@ -619,8 +642,7 @@ export async function saveProject(
           item.width,
         height:
           item.height,
-      }),
-    );
+      }));
 
   const updated: StoredProject = {
     ...existing,
@@ -731,4 +753,220 @@ export async function deleteProject(
   );
 
   db.close();
+}
+
+/* ---------------------------------------------------------
+   PERSISTENCE & STORAGE HEALTH
+--------------------------------------------------------- */
+
+export interface StorageHealth {
+  persisted: boolean;
+  quotaBytes?: number;
+  usageBytes?: number;
+}
+
+export async function requestPersistentStorage(): Promise<StorageHealth> {
+  if (typeof window === "undefined" || !navigator.storage) {
+    return { persisted: false };
+  }
+
+  let persisted = false;
+  try {
+    persisted = await navigator.storage.persisted();
+    if (!persisted && navigator.storage.persist) {
+      persisted = await navigator.storage.persist();
+    }
+  } catch (error) {
+    console.warn("Storage persistence request failed:", error);
+  }
+
+  let quotaBytes: number | undefined;
+  let usageBytes: number | undefined;
+  try {
+    if (navigator.storage.estimate) {
+      const estimate = await navigator.storage.estimate();
+      quotaBytes = estimate.quota;
+      usageBytes = estimate.usage;
+    }
+  } catch {}
+
+  return { persisted, quotaBytes, usageBytes };
+}
+
+/* ---------------------------------------------------------
+   PORTABLE PROJECT BUNDLE (.vidsbit ARCHIVE)
+--------------------------------------------------------- */
+
+export async function exportProjectBundle(
+  projectId: string,
+): Promise<{ blob: Blob; fileName: string }> {
+  const db = await openDatabase();
+
+  const transaction = db.transaction(PROJECT_STORE, "readonly");
+  const store = transaction.objectStore(PROJECT_STORE);
+  const project = await requestResult<StoredProject | undefined>(
+    store.get(projectId),
+  );
+
+  await transactionComplete(transaction);
+  db.close();
+
+  if (!project) {
+    throw new Error("Project not found for bundle export.");
+  }
+
+  const zip = new JSZip();
+
+  const mediaManifest: Array<{
+    id: string;
+    name: string;
+    type: MediaFile["type"];
+    duration?: number;
+    width?: number;
+    height?: number;
+    zipPath: string;
+  }> = [];
+
+  const mediaFolder = zip.folder("media");
+
+  for (let i = 0; i < project.media.length; i++) {
+    const item = project.media[i];
+    if (!item.file) continue;
+
+    const safeName = `${item.id}_${item.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const zipPath = `media/${safeName}`;
+
+    if (mediaFolder) {
+      mediaFolder.file(safeName, item.file, { binary: true });
+    }
+
+    mediaManifest.push({
+      id: item.id,
+      name: item.name,
+      type: item.type,
+      duration: item.duration,
+      width: item.width,
+      height: item.height,
+      zipPath,
+    });
+  }
+
+  const bundleData = {
+    format: "vidsbit-project-bundle",
+    version: 1,
+    exportedAt: Date.now(),
+    project: {
+      id: project.id,
+      name: project.name,
+      folderId: project.folderId,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+      currentTime: project.currentTime,
+      selectedClipId: project.selectedClipId,
+      clips: project.clips,
+      media: mediaManifest,
+    },
+  };
+
+  zip.file("vidsbit-project.json", JSON.stringify(bundleData, null, 2));
+
+  const blob = await zip.generateAsync({
+    type: "blob",
+    compression: "STORE",
+    mimeType: "application/octet-stream",
+  });
+
+  const safeFileName =
+    project.name.trim().replace(/[^a-zA-Z0-9_-]/g, "_") || "project";
+
+  return {
+    blob,
+    fileName: `${safeFileName}.vidsbit`,
+  };
+}
+
+export async function importProjectBundle(
+  file: File,
+  targetFolderId?: string,
+): Promise<ProjectSummary> {
+  const zip = await JSZip.loadAsync(file);
+
+  const manifestFile =
+    zip.file("vidsbit-project.json") ?? zip.file("project.json");
+
+  if (!manifestFile) {
+    throw new Error("Invalid .vidsbit archive: manifest file missing.");
+  }
+
+  const jsonText = await manifestFile.async("text");
+  const manifest = JSON.parse(jsonText);
+
+  if (!manifest.project || !Array.isArray(manifest.project.clips)) {
+    throw new Error("Invalid project structure inside archive.");
+  }
+
+  const proj = manifest.project;
+  const now = Date.now();
+  const newProjectId = `project-${now}-${Math.random().toString(36).slice(2)}`;
+
+  const defaultFolder = await ensureDefaultFolder();
+  const folderId = targetFolderId ?? proj.folderId ?? defaultFolder.id;
+
+  const storedMedia: StoredMediaFile[] = [];
+
+  for (const m of proj.media ?? []) {
+    const entry = zip.file(m.zipPath);
+    if (!entry) continue;
+
+    const buffer = await entry.async("arraybuffer");
+    const mime =
+      m.type === "video"
+        ? "video/mp4"
+        : m.type === "audio"
+          ? "audio/mpeg"
+          : "image/png";
+
+    const restoredFile = new File([buffer], m.name, {
+      type: mime,
+      lastModified: now,
+    });
+
+    storedMedia.push({
+      id: m.id,
+      name: m.name,
+      type: m.type,
+      file: restoredFile,
+      duration: m.duration,
+      width: m.width,
+      height: m.height,
+    });
+  }
+
+  const newProject: StoredProject = {
+    id: newProjectId,
+    name: proj.name ? `${proj.name} (Imported)` : "Imported Project",
+    folderId,
+    createdAt: now,
+    updatedAt: now,
+    media: storedMedia,
+    clips: (proj.clips as TimelineClip[]).map((c) => hydrateClip(c)),
+    selectedClipId: proj.selectedClipId ?? null,
+    currentTime: Number.isFinite(proj.currentTime) ? proj.currentTime : 0,
+  };
+
+  const db = await openDatabase();
+  const transaction = db.transaction(PROJECT_STORE, "readwrite");
+  transaction.objectStore(PROJECT_STORE).put(newProject, newProject.id);
+  await transactionComplete(transaction);
+  db.close();
+
+  return {
+    id: newProject.id,
+    name: newProject.name,
+    folderId: newProject.folderId,
+    createdAt: newProject.createdAt,
+    updatedAt: newProject.updatedAt,
+    mediaCount: newProject.media.length,
+    clipCount: newProject.clips.length,
+  };
 }

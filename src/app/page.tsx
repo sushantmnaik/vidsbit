@@ -16,6 +16,8 @@ import {
 import MediaPanel from "@/components/editor/MediaPanel";
 import Preview from "@/components/editor/Preview";
 import Timeline from "@/components/editor/Timeline";
+import Inspector from "@/components/editor/Inspector";
+import ShortcutsModal from "@/components/editor/ShortcutsModal";
 import ExportDialog from "@/components/editor/ExportDialog";
 import ProjectManager from "@/components/editor/ProjectManager";
 
@@ -25,21 +27,28 @@ import {
 } from "@/lib/exportVideo";
 
 import {
-  EditorState,
-} from "@/types/editor";
-
-import {
   createProject,
   ensureDefaultFolder,
   loadProject,
   saveProject,
+  requestPersistentStorage,
+  exportProjectBundle,
   ProjectSummary,
 } from "@/lib/projectStorage";
 
 import {
+  EditorState,
   MediaFile,
   MediaType,
   TimelineClip,
+  FilterPreset,
+  TransitionType,
+  emptyEditorState,
+  hydrateClip,
+  defaultTracks,
+  DEFAULT_CAPTION_STYLE,
+  DEFAULT_PROJECT_SETTINGS,
+  DEFAULT_IMAGE_DURATION,
 } from "@/types/editor";
 
 export default function Home() {
@@ -102,35 +111,72 @@ export default function Home() {
       null,
     );
 
-  
+  const [timelineZoom, setTimelineZoom] =
+    useState(1);
+
+  const [aspectRatio, setAspectRatio] =
+    useState("16:9");
+
+  const [shortcutsOpen, setShortcutsOpen] =
+    useState(false);
+
+  const [videoTrackCount, setVideoTrackCount] =
+    useState(2);
+
+  const [audioTrackCount, setAudioTrackCount] =
+    useState(2);
+
+  const [selectedVideoTrack, setSelectedVideoTrack] =
+    useState(0);
+
+  const [selectedAudioTrack, setSelectedAudioTrack] =
+    useState(0);
+
+  const [snapEnabled, setSnapEnabled] =
+    useState(true);
+
+  const [musicSearch, setMusicSearch] =
+    useState("");
+
+  const [musicMood, setMusicMood] =
+    useState("Any");
+
+  const [musicGenre, setMusicGenre] =
+    useState("Any");
+
+  const [musicLanguage, setMusicLanguage] =
+    useState("Any");
+
   const {
-  record,
-  undo,
-  redo,
-  clearHistory,
-  canUndo,
-  canRedo,
-} = useEditorHistory({
-  media: [],
-  clips: [],
-  selectedClipId: null,
-  currentTime: 0,
-});
+    record,
+    undo,
+    redo,
+    clearHistory,
+    canUndo,
+    canRedo,
+  } = useEditorHistory(emptyEditorState());
 
-
-const getEditorState =
-  useCallback(
+  const getEditorState = useCallback(
     (): EditorState => ({
       media,
       clips,
+      tracks: defaultTracks(),
+      texts: [],
+      captions: [],
+      captionStyle: { ...DEFAULT_CAPTION_STYLE },
       selectedClipId,
+      selectedTextId: null,
+      selectedCaptionId: null,
       currentTime,
+      snapEnabled,
+      settings: { ...DEFAULT_PROJECT_SETTINGS },
     }),
     [
       media,
       clips,
       selectedClipId,
       currentTime,
+      snapEnabled,
     ],
   );
 
@@ -323,6 +369,7 @@ useEffect(() => {
     } finally {
       if (!cancelled) {
         setIsHydrated(true);
+        void requestPersistentStorage();
       }
     }
   }
@@ -352,12 +399,7 @@ useEffect(() => {
       window.setTimeout(() => {
         saveProject(
           currentProject.id,
-          {
-            media,
-            clips,
-            selectedClipId,
-            currentTime,
-          },
+          getEditorState(),
         ).catch((error) => {
           console.error(
             "VIDSBIT project save failed:",
@@ -372,10 +414,7 @@ useEffect(() => {
       );
     };
   }, [
-    media,
-    clips,
-    selectedClipId,
-    currentTime,
+    getEditorState,
     currentProject,
     isHydrated,
   ]);
@@ -630,6 +669,15 @@ useEffect(() => {
 
             height:
               metadata.height,
+
+            missing: false,
+
+            reference: {
+              fileName: file.name,
+              size: file.size,
+              lastModified: file.lastModified,
+              mimeType: file.type,
+            },
           });
         }
 
@@ -667,7 +715,7 @@ useEffect(() => {
             firstVideo.duration
           ) {
             const newClip: TimelineClip =
-              {
+              hydrateClip({
                 id:
                   `clip-${Date.now()}-${Math.random()
                     .toString(36)
@@ -684,7 +732,7 @@ useEffect(() => {
                 timelineStart: 0,
 
                 track: 0,
-              };
+              });
 
             setClips([
               newClip,
@@ -717,14 +765,16 @@ useEffect(() => {
               mediaId,
           );
 
-        if (
-          !item ||
-          item.type !==
-            "video" ||
-          !item.duration
-        ) {
+        if (!item) {
           return;
         }
+
+        const itemDuration =
+          item.duration && item.duration > 0
+            ? item.duration
+            : item.type === "image"
+              ? DEFAULT_IMAGE_DURATION
+              : 5;
 
         const timelineEnd =
           clips.reduce(
@@ -741,8 +791,36 @@ useEffect(() => {
             0,
           );
 
+        const isAudioItem = item.type === "audio";
+        const targetTrack = isAudioItem
+          ? Math.min(
+              selectedAudioTrack,
+              Math.max(0, audioTrackCount - 1),
+            )
+          : Math.min(
+              selectedVideoTrack,
+              Math.max(0, videoTrackCount - 1),
+            );
+
+        // Multi-track layer placement:
+        // - Overlay tracks (track > 0) or audio: start at current playhead position
+        // - Main video track (track 0): append to existing track 0 clips, or place at playhead
+        let startPosition = 0;
+        if (targetTrack > 0 || isAudioItem) {
+          startPosition = Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0;
+        } else {
+          const track0Clips = clips.filter(
+            (c) => c.track === 0 && c.trackKind !== "audio",
+          );
+          const track0End = track0Clips.reduce(
+            (max, c) => Math.max(max, c.timelineStart + (c.sourceEnd - c.sourceStart)),
+            0,
+          );
+          startPosition = currentTime > track0End ? currentTime : track0End;
+        }
+
         const newClip: TimelineClip =
-          {
+          hydrateClip({
             id:
               `clip-${Date.now()}-${Math.random()
                 .toString(36)
@@ -753,13 +831,35 @@ useEffect(() => {
             sourceStart: 0,
 
             sourceEnd:
-              item.duration,
+              itemDuration,
 
             timelineStart:
-              timelineEnd,
+              startPosition,
 
-            track: 0,
-          };
+            track: targetTrack,
+            trackKind: isAudioItem ? "audio" : "video",
+            speed: 1,
+            volume: 100,
+            transition: "none",
+            rotation: 0,
+            filter: "none",
+            crop: "none",
+            textOverlay: "",
+            textAnimation: "none",
+            captionStyle: "classic",
+            captionAnimation: "none",
+            chromaKey: "none",
+            videoBackgroundRemoval: "none",
+            imageBackgroundRemoval: "none",
+            advancedEffect: "none",
+            pictureInPicture: targetTrack > 0,
+            fadeIn: 0,
+            fadeOut: 0,
+            audioTrimStart: 0,
+            audioTrimEnd: 0,
+            backgroundMusic: "none",
+            snapEnabled: snapEnabled,
+          });
 
         setClips(
           (previous) => [
@@ -772,8 +872,164 @@ useEffect(() => {
           newClip.id,
         );
       },
-      [media, clips],
+      [
+        media,
+        clips,
+        currentTime,
+        selectedVideoTrack,
+        videoTrackCount,
+        selectedAudioTrack,
+        audioTrackCount,
+        snapEnabled,
+      ],
     );
+
+  const handleAddStockAudio = useCallback(
+    (track: { title: string; url: string; duration: number }) => {
+      const stockId = `stock-audio-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const mediaItem: MediaFile = {
+        id: stockId,
+        name: track.title,
+        type: "audio",
+        file: null,
+        url: track.url,
+        duration: track.duration,
+        missing: false,
+        reference: {
+          fileName: `${track.title}.mp3`,
+          size: 0,
+          lastModified: Date.now(),
+          mimeType: "audio/mp3",
+        },
+      };
+
+      setMedia((prev) => [...prev, mediaItem]);
+
+      const startPosition = Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0;
+
+      const newClip: TimelineClip = hydrateClip({
+        id: `clip-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        mediaId: stockId,
+        sourceStart: 0,
+        sourceEnd: track.duration,
+        timelineStart: startPosition,
+        track: selectedAudioTrack,
+        trackKind: "audio",
+        speed: 1,
+        volume: 100,
+        transition: "none",
+        rotation: 0,
+        filter: "none",
+        crop: "none",
+        textOverlay: "",
+        textAnimation: "none",
+        captionStyle: "classic",
+        captionAnimation: "none",
+        chromaKey: "none",
+        videoBackgroundRemoval: "none",
+        imageBackgroundRemoval: "none",
+        advancedEffect: "none",
+        pictureInPicture: false,
+        fadeIn: 0,
+        fadeOut: 0,
+        audioTrimStart: 0,
+        audioTrimEnd: 0,
+        backgroundMusic: "none",
+        snapEnabled: snapEnabled,
+      });
+
+      setClips((prev) => [...prev, newClip]);
+      setSelectedClipId(newClip.id);
+    },
+    [selectedAudioTrack, snapEnabled, currentTime],
+  );
+
+  const updateSelectedClip = useCallback(
+    (partial: Partial<TimelineClip>) => {
+      if (!selectedClipId) {
+        return;
+      }
+
+      setClips((previous) =>
+        previous.map((clip) =>
+          clip.id === selectedClipId ? { ...clip, ...partial } : clip,
+        ),
+      );
+    },
+    [selectedClipId],
+  );
+
+  const handleApplyFilter = useCallback(
+    (filter: FilterPreset) => {
+      if (!selectedClipId) return;
+      updateSelectedClip({ filter });
+    },
+    [selectedClipId, updateSelectedClip],
+  );
+
+  const handleApplyTransition = useCallback(
+    (transition: TransitionType) => {
+      if (!selectedClipId) return;
+      updateSelectedClip({ transition });
+    },
+    [selectedClipId, updateSelectedClip],
+  );
+
+  const handleAddTextOverlay = useCallback(
+    (text: string) => {
+      if (selectedClipId) {
+        setClips((prev) =>
+          prev.map((c) => (c.id === selectedClipId ? { ...c, textOverlay: text } : c)),
+        );
+      } else {
+        const clipAtPlayhead = clips.find(
+          (c) =>
+            currentTime >= c.timelineStart &&
+            currentTime < c.timelineStart + (c.sourceEnd - c.sourceStart),
+        );
+        if (clipAtPlayhead) {
+          setSelectedClipId(clipAtPlayhead.id);
+          setClips((prev) =>
+            prev.map((c) => (c.id === clipAtPlayhead.id ? { ...c, textOverlay: text } : c)),
+          );
+        } else {
+          alert("Please select a clip on the timeline to apply this title / text overlay.");
+        }
+      }
+    },
+    [selectedClipId, clips, currentTime],
+  );
+
+  const handleAddTextPrompt = useCallback(() => {
+    const active = clips.find((c) => c.id === selectedClipId);
+    const current = active?.textOverlay ?? "";
+    const next = window.prompt("Enter Title / Text Overlay:", current || "Default Title");
+    if (next !== null && next.trim()) {
+      handleAddTextOverlay(next.trim());
+    }
+  }, [clips, selectedClipId, handleAddTextOverlay]);
+
+  const getTimelineDuration = useCallback(() => {
+    return Math.max(
+      0.1,
+      clips.reduce(
+        (max, clip) =>
+          Math.max(
+            max,
+            clip.timelineStart + (clip.sourceEnd - clip.sourceStart),
+          ),
+        0,
+      ),
+    );
+  }, [clips]);
+
+  const handleJumpToStart = useCallback(() => {
+    setCurrentTime(0);
+  }, []);
+
+  const handleJumpToEnd = useCallback(() => {
+    setCurrentTime(getTimelineDuration());
+  }, [getTimelineDuration]);
 
   /*
    * ---------------------------------------------------------
@@ -784,29 +1040,19 @@ useEffect(() => {
   const normalizeClips = (
     source: TimelineClip[],
   ) => {
-    let position = 0;
-
-    return source.map(
-      (clip) => {
-        const duration =
-          Math.max(
-            0,
-            clip.sourceEnd -
-              clip.sourceStart,
-          );
-
-        const result = {
-          ...clip,
-          timelineStart:
-            position,
-        };
-
-        position +=
-          duration;
-
-        return result;
-      },
-    );
+    return source.map((clip) => {
+      const sourceStart = Math.max(0, clip.sourceStart);
+      const sourceEnd = Math.max(sourceStart + 0.1, clip.sourceEnd);
+      return {
+        ...clip,
+        sourceStart,
+        sourceEnd,
+        timelineStart: Math.max(
+          0,
+          Number.isFinite(clip.timelineStart) ? clip.timelineStart : 0,
+        ),
+      };
+    });
   };
 
   /*
@@ -816,10 +1062,19 @@ useEffect(() => {
    */
 
   const handleSelectClip =
-    (clipId: string) => {
+    (clipId: string | null) => {
       setSelectedClipId(
         clipId,
       );
+      if (clipId) {
+        const found = clips.find((c) => c.id === clipId);
+        if (found) {
+          const duration = Math.max(0.1, found.sourceEnd - found.sourceStart);
+          if (currentTime < found.timelineStart || currentTime >= found.timelineStart + duration) {
+            setCurrentTime(found.timelineStart);
+          }
+        }
+      }
     };
 
   /*
@@ -830,6 +1085,16 @@ useEffect(() => {
 
   const handleDeleteClip =
     (clipId: string) => {
+      const clipToDelete = clips.find(
+        (clip) => clip.id === clipId,
+      );
+
+      if (!clipToDelete) {
+        return;
+      }
+
+      record(getEditorState());
+
       const updated =
         clips.filter(
           (clip) =>
@@ -842,9 +1107,7 @@ useEffect(() => {
           updated,
         );
 
-      setClips(
-        normalized,
-      );
+      setClips(normalized);
 
       if (
         selectedClipId ===
@@ -857,103 +1120,322 @@ useEffect(() => {
       }
     };
 
-  /*
-   * ---------------------------------------------------------
-   * Trim start
-   * ---------------------------------------------------------
-   */
+  const handleTrimStart =
+    (clipId: string) => {
+      const clip =
+        clips.find(
+          (item) =>
+            item.id === clipId,
+        );
 
-const handleTrimStart =
-  (clipId: string) => {
-    const clip =
-      clips.find(
-        (item) =>
-          item.id === clipId,
+      if (!clip) {
+        return;
+      }
+
+      record(
+        getEditorState(),
       );
 
-    if (!clip) {
-      return;
-    }
+      const sourceDuration =
+        Math.max(
+          0.1,
+          clip.sourceEnd -
+            clip.sourceStart,
+        );
+      const relative =
+        currentTime -
+        clip.timelineStart;
+      let trimAmount = 0.5;
 
-    record(
-      getEditorState(),
-    );
+      if (
+        relative > 0.05 &&
+        relative < sourceDuration - 0.05
+      ) {
+        trimAmount = relative;
+      } else {
+        trimAmount = Math.min(
+          1,
+          sourceDuration / 2,
+        );
+      }
 
-    setClips(
-      (previous) =>
+      setClips((previous) =>
         normalizeClips(
-          previous.map(
-            (item) => {
-              if (
-                item.id !==
-                clipId
-              ) {
-                return item;
-              }
+          previous.map((item) => {
+            if (item.id !== clipId) {
+              return item;
+            }
 
-              const duration =
-                item.sourceEnd -
-                item.sourceStart;
+            const nextStart =
+              Math.min(
+                item.sourceEnd - 0.1,
+                item.sourceStart + trimAmount,
+              );
+            const actualDelta = nextStart - item.sourceStart;
 
-              const amount =
-                Math.min(
-                  1,
-                  duration / 2,
-                );
-
-              return {
-                ...item,
-                sourceStart:
-                  item.sourceStart +
-                  amount,
-              };
-            },
-          ),
+            return {
+              ...item,
+              sourceStart: nextStart,
+              timelineStart: item.timelineStart + actualDelta,
+            };
+          }),
         ),
-    );
-  };
-  /*
-   * ---------------------------------------------------------
-   * Trim end
-   * ---------------------------------------------------------
-   */
+      );
+    };
 
   const handleTrimEnd =
     (clipId: string) => {
-      setClips(
-        (previous) =>
-          normalizeClips(
-            previous.map(
-              (clip) => {
-                if (
-                  clip.id !==
-                  clipId
-                ) {
-                  return clip;
-                }
+      const clip =
+        clips.find(
+          (item) => item.id === clipId,
+        );
 
-                const duration =
-                  clip.sourceEnd -
-                  clip.sourceStart;
+      if (!clip) {
+        return;
+      }
 
-                const amount =
-                  Math.min(
-                    1,
-                    duration /
-                      2,
-                  );
+      record(getEditorState());
 
-                return {
-                  ...clip,
-                  sourceEnd:
-                    clip.sourceEnd -
-                    amount,
-                };
-              },
-            ),
-          ),
+      const sourceDuration =
+        Math.max(
+          0.1,
+          clip.sourceEnd - clip.sourceStart,
+        );
+      const relative =
+        currentTime -
+        clip.timelineStart;
+      let trimAmount = 0.5;
+
+      if (
+        relative > 0.05 &&
+        relative < sourceDuration - 0.05
+      ) {
+        trimAmount = sourceDuration - relative;
+      } else {
+        trimAmount = Math.min(
+          1,
+          sourceDuration / 2,
+        );
+      }
+
+      setClips((previous) =>
+        normalizeClips(
+          previous.map((item) => {
+            if (item.id !== clipId) {
+              return item;
+            }
+
+            const nextEnd =
+              Math.max(
+                item.sourceStart + 0.1,
+                item.sourceEnd - trimAmount,
+              );
+
+            return {
+              ...item,
+              sourceEnd: nextEnd,
+            };
+          }),
+        ),
       );
     };
+
+  const handleDuplicateClip =
+    (clipId: string) => {
+      const clip =
+        clips.find(
+          (item) => item.id === clipId,
+        );
+
+      if (!clip) {
+        return;
+      }
+
+      record(getEditorState());
+
+      const duplicated: TimelineClip = {
+        ...clip,
+        id: `clip-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        timelineStart:
+          clip.timelineStart +
+          Math.max(0.25, clip.sourceEnd - clip.sourceStart),
+      };
+
+      const updated = [...clips, duplicated];
+
+      setClips(normalizeClips(updated));
+      setSelectedClipId(duplicated.id);
+    };
+
+  const handleReorderClip = (
+    sourceId: string,
+    targetId: string,
+  ) => {
+    if (sourceId === targetId) {
+      return;
+    }
+
+    const sourceClip = clips.find((c) => c.id === sourceId);
+    const targetClip = clips.find((c) => c.id === targetId);
+    if (!sourceClip || !targetClip) {
+      return;
+    }
+
+    record(getEditorState());
+
+    const tempStart = sourceClip.timelineStart;
+    const nextClips = clips.map((c) => {
+      if (c.id === sourceId) {
+        return {
+          ...c,
+          timelineStart: targetClip.timelineStart,
+          track: targetClip.track,
+          trackKind: targetClip.trackKind,
+        };
+      }
+      if (c.id === targetId) {
+        return {
+          ...c,
+          timelineStart: tempStart,
+        };
+      }
+      return c;
+    });
+
+    setClips(normalizeClips(nextClips));
+  };
+
+  const handleTrimDragBegin = (
+    clipId: string,
+    handle: "start" | "end",
+  ) => {
+    record(getEditorState());
+    setSelectedClipId(clipId);
+    // The actual pointer movement updates happen in the timeline panel.
+    void handle;
+  };
+
+  const handleTrimDragUpdate = (
+    clipId: string,
+    handle: "start" | "end",
+    deltaSeconds: number,
+  ) => {
+    if (!Number.isFinite(deltaSeconds)) {
+      return;
+    }
+
+    setClips((previous) =>
+      normalizeClips(
+        previous.map((clip) => {
+          if (clip.id !== clipId) {
+            return clip;
+          }
+
+          const sourceDuration =
+            Math.max(0.1, clip.sourceEnd - clip.sourceStart);
+          const adjustedDelta =
+            handle === "start" ? deltaSeconds : -deltaSeconds;
+          const nextStart =
+            handle === "start"
+              ? Math.min(
+                  clip.sourceEnd - 0.1,
+                  clip.sourceStart + adjustedDelta,
+                )
+              : clip.sourceStart;
+          const nextEnd =
+            handle === "end"
+              ? Math.max(
+                  clip.sourceStart + 0.1,
+                  clip.sourceEnd + adjustedDelta,
+                )
+              : clip.sourceEnd;
+
+          if (handle === "start") {
+            const nextStartVal = Math.min(
+              clip.sourceEnd - 0.1,
+              Math.max(0, nextStart),
+            );
+            const actualDelta = nextStartVal - clip.sourceStart;
+            return {
+              ...clip,
+              sourceStart: nextStartVal,
+              timelineStart: Math.max(0, clip.timelineStart + actualDelta),
+            };
+          }
+
+          const endValue = Math.max(
+            clip.sourceStart + 0.1,
+            Math.min(
+              clip.sourceStart + sourceDuration + 2,
+              nextEnd,
+            ),
+          );
+
+          return {
+            ...clip,
+            sourceEnd: endValue,
+          };
+        }),
+      ),
+    );
+  };
+
+  const handleZoomIn = useCallback(() => {
+    setTimelineZoom((value) =>
+      Math.min(5, Math.round((value + 0.25) * 100) / 100),
+    );
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setTimelineZoom((value) =>
+      Math.max(1, Math.round((value - 0.25) * 100) / 100),
+    );
+  }, []);
+
+  const handleFitTimeline = useCallback(() => {
+    setTimelineZoom(1);
+  }, []);
+
+  const handleZoomChange = useCallback((zoom: number) => {
+    setTimelineZoom(
+      Math.max(1, Math.min(5, Math.round(zoom * 100) / 100)),
+    );
+  }, []);
+
+  const snapToNearestClip =
+    useCallback(
+      (time: number) => {
+        if (!snapEnabled || clips.length === 0) {
+          return time;
+        }
+
+        const candidates = [0];
+
+        for (const clip of clips) {
+          candidates.push(clip.timelineStart);
+          candidates.push(
+            clip.timelineStart +
+              (clip.sourceEnd - clip.sourceStart),
+          );
+        }
+
+        const nearest = candidates.reduce(
+          (best, candidate) => {
+            const distance = Math.abs(candidate - time);
+
+            if (distance < Math.abs(best - time)) {
+              return candidate;
+            }
+
+            return best;
+          },
+          candidates[0],
+        );
+
+        return nearest;
+      },
+      [clips, snapEnabled],
+    );
 
   /*
    * ---------------------------------------------------------
@@ -979,24 +1461,27 @@ const handleTrimStart =
         clip.timelineStart;
 
       const duration =
-        clip.sourceEnd -
-        clip.sourceStart;
+        Math.max(
+          0.1,
+          clip.sourceEnd -
+            clip.sourceStart,
+        );
 
+      let splitOffset = relative;
       if (
-        relative <= 0 ||
-        relative >= duration
+        splitOffset <= 0.05 ||
+        splitOffset >= duration - 0.05
       ) {
-        return;
+        splitOffset = duration / 2;
       }
 
-
-    record(
-      getEditorState(),
-    );
+      record(
+        getEditorState(),
+      );
 
       const split =
         clip.sourceStart +
-        relative;
+        splitOffset;
 
       const first = {
         ...clip,
@@ -1006,6 +1491,8 @@ const handleTrimStart =
             .slice(2)}`,
         sourceEnd:
           split,
+        timelineStart:
+          clip.timelineStart,
       };
 
       const second = {
@@ -1016,6 +1503,8 @@ const handleTrimStart =
             .slice(2)}`,
         sourceStart:
           split,
+        timelineStart:
+          clip.timelineStart + splitOffset,
       };
 
       const index =
@@ -1054,56 +1543,59 @@ const handleTrimStart =
    * ---------------------------------------------------------
    */
 
-  const handleMoveClip =
-  (
-    clipId: string,
-    direction:
-      | "left"
-      | "right",
-  ) => {
-    const index =
-      clips.findIndex(
-        (clip) =>
-          clip.id === clipId,
-      );
-
-    if (index === -1) {
+  const handleMoveClip = (clipId: string, direction: "left" | "right") => {
+    const clip = clips.find((c) => c.id === clipId);
+    if (!clip) {
       return;
     }
 
-    const target =
-      direction === "left"
-        ? index - 1
-        : index + 1;
+    record(getEditorState());
 
-    if (
-      target < 0 ||
-      target >= clips.length
-    ) {
-      return;
-    }
+    const delta = direction === "left" ? -1 : 1;
+    const nextStart = Math.max(0, clip.timelineStart + delta);
 
-    record(
-      getEditorState(),
-    );
-
-    const updated =
-      [...clips];
-
-    [
-      updated[index],
-      updated[target],
-    ] = [
-      updated[target],
-      updated[index],
-    ];
-
-    setClips(
+    setClips((prev) =>
       normalizeClips(
-        updated,
+        prev.map((c) => (c.id === clipId ? { ...c, timelineStart: nextStart } : c)),
       ),
     );
   };
+
+  const handleUpdateClipStart = useCallback((clipId: string, newStart: number) => {
+    setClips((prev) =>
+      prev.map((clip) =>
+        clip.id === clipId
+          ? {
+              ...clip,
+              timelineStart: Math.max(
+                0,
+                Math.round(newStart * 100) / 100,
+              ),
+            }
+          : clip,
+      ),
+    );
+  }, []);
+
+  const handleUpdateClipTrack = useCallback(
+    (clipId: string, newTrack: number, newTrackKind?: "video" | "audio") => {
+      record(getEditorState());
+      setClips((prev) =>
+        prev.map((clip) => {
+          if (clip.id !== clipId) {
+            return clip;
+          }
+          return {
+            ...clip,
+            track: newTrack,
+            ...(newTrackKind ? { trackKind: newTrackKind } : {}),
+            pictureInPicture: newTrack > 0,
+          };
+        }),
+      );
+    },
+    [getEditorState, record],
+  );
   /*
    * ---------------------------------------------------------
    * Active clip
@@ -1128,6 +1620,14 @@ const handleTrimStart =
     ) ??
     clips[clips.length - 1] ??
     null;
+
+  const selectedClip =
+    clips.find(
+      (clip) =>
+        clip.id === selectedClipId,
+    ) ?? null;
+
+  const timelineDuration = getTimelineDuration();
 
   /*
    * ---------------------------------------------------------
@@ -1254,40 +1754,12 @@ const handleTrimStart =
       );
     };
 
-  const handleVideoEnded =
-    () => {
-      if (!activeClip) {
-        setIsPlaying(
-          false,
-        );
-
-        return;
-      }
-
-      const index =
-        clips.findIndex(
-          (clip) =>
-            clip.id ===
-            activeClip.id,
-        );
-
-      const next =
-        clips[index + 1];
-
-      if (next) {
-        setCurrentTime(
-          next.timelineStart,
-        );
-
-        setSelectedClipId(
-          next.id,
-        );
-      } else {
-        setIsPlaying(
-          false,
-        );
-      }
-    };
+  const handleVideoEnded = () => {
+    const totalDuration = getTimelineDuration();
+    if (currentTime >= totalDuration - 0.15) {
+      setIsPlaying(false);
+    }
+  };
 
   /*
    * ---------------------------------------------------------
@@ -1297,10 +1769,12 @@ const handleTrimStart =
 
   const handleSeek =
     (time: number) => {
+      const snapped = snapToNearestClip(time);
+
       setCurrentTime(
         Math.max(
           0,
-          time,
+          snapped,
         ),
       );
     };
@@ -1335,9 +1809,11 @@ const handleTrimStart =
       for (
         const item of media
       ) {
-        URL.revokeObjectURL(
-          item.url,
-        );
+        if (item.url) {
+          URL.revokeObjectURL(
+            item.url,
+          );
+        }
       }
 
       setMedia(
@@ -1411,6 +1887,7 @@ const handleTrimStart =
             media,
             clips,
             {
+              aspectRatio,
               onStage:
                 setExportStage,
 
@@ -1431,8 +1908,9 @@ const handleTrimStart =
 
         link.href = url;
 
-        link.download =
-          "vidsbit-export.mp4";
+        link.download = blob.type.includes("webm")
+          ? "vidsbit-export.webm"
+          : "vidsbit-export.mp4";
 
         document.body.appendChild(
           link,
@@ -1515,6 +1993,9 @@ const handleTrimStart =
       event.key === "Escape"
     ) {
       setProjectManagerOpen(
+        false,
+      );
+      setShortcutsOpen(
         false,
       );
 
@@ -1618,6 +2099,88 @@ const handleTrimStart =
         return;
       }
 
+      /*
+       * Duplicate (Ctrl+D)
+       */
+      if (
+        event.key.toLowerCase() === "d"
+      ) {
+        event.preventDefault();
+        if (selectedClipId) {
+          handleDuplicateClip(selectedClipId);
+        }
+        return;
+      }
+
+      /*
+       * Split (Ctrl+B)
+       */
+      if (
+        event.key.toLowerCase() === "b"
+      ) {
+        event.preventDefault();
+        if (selectedClipId) {
+          handleSplitClip(selectedClipId);
+        }
+        return;
+      }
+
+        /*
+       * Zoom In (+ or =)
+       */
+      if (
+        event.key === "=" ||
+        event.key === "+"
+      ) {
+        event.preventDefault();
+        handleZoomIn();
+        return;
+      }
+
+      /*
+       * Zoom Out (-)
+       */
+      if (
+        event.key === "-" ||
+        event.key === "_"
+      ) {
+        event.preventDefault();
+        handleZoomOut();
+        return;
+      }
+
+      /*
+       * Fit Timeline (0)
+       */
+      if (
+        event.key === "0"
+      ) {
+        event.preventDefault();
+        handleFitTimeline();
+        return;
+      }
+
+      return;
+    }
+
+    /*
+     * Direct Zoom shortcuts (+ / -) without modifiers
+     */
+    if (
+      event.key === "=" ||
+      event.key === "+"
+    ) {
+      event.preventDefault();
+      handleZoomIn();
+      return;
+    }
+
+    if (
+      event.key === "-" ||
+      event.key === "_"
+    ) {
+      event.preventDefault();
+      handleZoomOut();
       return;
     }
 
@@ -1678,6 +2241,67 @@ const handleTrimStart =
     }
 
     /*
+     * Q or [ = Ripple Trim Left / Start
+     */
+    if (
+      event.key.toLowerCase() === "q" ||
+      event.key === "["
+    ) {
+      if (selectedClipId) {
+        event.preventDefault();
+        handleTrimStart(selectedClipId);
+      }
+      return;
+    }
+
+    /*
+     * W or ] = Ripple Trim Right / End
+     */
+    if (
+      event.key.toLowerCase() === "w" ||
+      event.key === "]"
+    ) {
+      if (selectedClipId) {
+        event.preventDefault();
+        handleTrimEnd(selectedClipId);
+      }
+      return;
+    }
+
+    /*
+     * N = Toggle Snapping Magnet
+     */
+    if (
+      event.key.toLowerCase() === "n"
+    ) {
+      event.preventDefault();
+      setSnapEnabled((value) => !value);
+      return;
+    }
+
+    /*
+     * T = Add / Edit Text
+     */
+    if (
+      event.key.toLowerCase() === "t"
+    ) {
+      event.preventDefault();
+      handleAddTextPrompt();
+      return;
+    }
+
+    /*
+     * ? = Toggle Shortcuts Cheatsheet
+     */
+    if (
+      event.key === "?"
+    ) {
+      event.preventDefault();
+      setShortcutsOpen((value) => !value);
+      return;
+    }
+
+    /*
      * Arrow keys
      */
     if (
@@ -1694,7 +2318,9 @@ const handleTrimStart =
         (value) =>
           Math.max(
             0,
-            value - amount,
+            snapToNearestClip(
+              value - amount,
+            ),
           ),
       );
 
@@ -1706,20 +2332,7 @@ const handleTrimStart =
     ) {
       event.preventDefault();
 
-      const duration =
-        clips.reduce(
-          (
-            max,
-            clip,
-          ) =>
-            Math.max(
-              max,
-              clip.timelineStart +
-                (clip.sourceEnd -
-                  clip.sourceStart),
-            ),
-          0,
-        );
+      const duration = getTimelineDuration();
 
       const amount =
         event.shiftKey
@@ -1730,7 +2343,9 @@ const handleTrimStart =
         (value) =>
           Math.min(
             duration,
-            value + amount,
+            snapToNearestClip(
+              value + amount,
+            ),
           ),
       );
 
@@ -1760,20 +2375,7 @@ const handleTrimStart =
     ) {
       event.preventDefault();
 
-      const duration =
-        clips.reduce(
-          (
-            max,
-            clip,
-          ) =>
-            Math.max(
-              max,
-              clip.timelineStart +
-                (clip.sourceEnd -
-                  clip.sourceStart),
-            ),
-          0,
-        );
+      const duration = getTimelineDuration();
 
       setCurrentTime(
         duration,
@@ -1802,7 +2404,17 @@ const handleTrimStart =
   currentProject,
   getEditorState,
   selectedClipId,
-  clips,
+  handleZoomIn,
+  handleZoomOut,
+  handleFitTimeline,
+  handleDeleteClip,
+  handleSplitClip,
+  handleTrimStart,
+  handleTrimEnd,
+  handleDuplicateClip,
+  handleAddTextPrompt,
+  getTimelineDuration,
+  snapToNearestClip,
 ]);
 
   /*
@@ -1813,175 +2425,203 @@ const handleTrimStart =
 
   return (
     <main className="editor-app" aria-label="VIDSBIT video editor app">
-      <header className="topbar">
-        <div className="brand" aria-label="VIDSBIT brand">
-          <div className="brand-mark">
-            <img
-              src="/android-chrome-192x192.png"
-              alt="VIDSBIT logo"
-            />
+      {/* PowerDirector / CapCut Studio Topbar */}
+      <header className="capcut-topbar">
+        <div className="topbar-left">
+          <div className="brand-logo">
+            <img src="/android-chrome-192x192.png" alt="VIDSBIT logo" />
           </div>
-
-          <div>
-            <h1>
-              VIDSBIT
-            </h1>
-
-            <span>
-              {currentProject?.name ??
-                "Video Editor"}
+          <div className="brand-titles">
+            <h2>VIDSBIT Studio</h2>
+            <span className="project-title-badge">
+              {currentProject?.name ?? "Untitled Project"}
             </span>
           </div>
         </div>
 
-        <div className="topbar-actions">
-
+        <div className="topbar-center">
           <button
-  className="history-button"
-  disabled={!canUndo}
-  onClick={handleUndo}
-  title="Undo (Ctrl+Z)"
->
-  ↶
-</button>
-
-<button
-  className="history-button"
-  disabled={!canRedo}
-  onClick={handleRedo}
-  title="Redo (Ctrl+Shift+Z)"
->
-  ↷
-</button>
-
-          <button
-            className="projects-button"
-            onClick={() =>
-              setProjectManagerOpen(
-                true,
-              )
-            }
+            type="button"
+            className="top-icon-btn"
+            disabled={!canUndo}
+            onClick={handleUndo}
+            title="Undo (Ctrl+Z)"
           >
-            Projects
+            ↶
           </button>
-
           <button
-            className="export-button"
-            disabled={
-              clips.length ===
-                0 ||
-              isExporting
-            }
-            onClick={
-              handleExport
-            }
+            type="button"
+            className="top-icon-btn"
+            disabled={!canRedo}
+            onClick={handleRedo}
+            title="Redo (Ctrl+Shift+Z / Ctrl+Y)"
           >
-            {isExporting
-              ? "Exporting..."
-              : "Export"}
+            ↷
+          </button>
+          <div className="top-divider" />
+          <span className="top-save-status">
+            <span className="save-dot" /> Auto-Saved
+          </span>
+        </div>
+
+        <div className="topbar-right">
+          <button
+            type="button"
+            className="top-action-btn"
+            onClick={() => setShortcutsOpen(true)}
+            title="Keyboard Shortcuts (?)"
+          >
+            ⌨ Shortcuts
+          </button>
+          <button
+            type="button"
+            className="top-action-btn"
+            onClick={() => setProjectManagerOpen(true)}
+            title="Project Manager (Ctrl+O)"
+          >
+            📁 Projects
+          </button>
+          <button
+            type="button"
+            className="top-action-btn"
+            disabled={!currentProject}
+            onClick={async () => {
+              if (!currentProject) return;
+              try {
+                const { blob, fileName } = await exportProjectBundle(currentProject.id);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+              } catch (e) {
+                alert(e instanceof Error ? e.message : "Failed to backup project.");
+              }
+            }}
+            title="Download portable offline backup (.vidsbit)"
+          >
+            💾 Backup
+          </button>
+          <button
+            type="button"
+            className="capcut-export-btn"
+            disabled={clips.length === 0 || isExporting}
+            onClick={handleExport}
+            title="Export Video (Enter)"
+          >
+            {isExporting ? "Exporting..." : "🎬 Export"}
           </button>
         </div>
       </header>
 
-      <div className="editor-workspace">
+      {/* Studio Upper Deck: Asset Library | Monitor | Inspector */}
+      <div className="capcut-upper-deck">
         <MediaPanel
           media={media}
-          onImport={
-            handleImport
-          }
-          onAddToTimeline={
-            handleAddToTimeline
-          }
+          onImport={handleImport}
+          onAddToTimeline={handleAddToTimeline}
+          onAddStockAudio={handleAddStockAudio}
+          onApplyFilter={handleApplyFilter}
+          onApplyTransition={handleApplyTransition}
+          onAddTextOverlay={handleAddTextOverlay}
+          selectedClipId={selectedClipId}
         />
 
         <Preview
-          activeClip={
-            activeClip
-          }
+          clips={clips}
           media={media}
-          isPlaying={
-            isPlaying
-          }
-          timelineTime={
-            currentTime
-          }
-          onVideoEnded={
-            handleVideoEnded
-          }
-          onTogglePlay={
-            handleTogglePlay
-          }
+          isPlaying={isPlaying}
+          timelineTime={currentTime}
+          totalDuration={getTimelineDuration()}
+          aspectRatio={aspectRatio}
+          onChangeAspectRatio={setAspectRatio}
+          onVideoEnded={handleVideoEnded}
+          onTogglePlay={handleTogglePlay}
+          onSeek={handleSeek}
+          onJumpToStart={handleJumpToStart}
+          onJumpToEnd={handleJumpToEnd}
+          selectedClipId={selectedClipId}
+          onSelectClip={handleSelectClip}
+          onUpdateClip={updateSelectedClip}
+        />
+
+        <Inspector
+          selectedClip={selectedClip}
+          media={media}
+          currentTime={currentTime}
+          onUpdateSelectedClip={updateSelectedClip}
+          onDeleteClip={handleDeleteClip}
+          onDuplicateClip={handleDuplicateClip}
+          onSplitClip={handleSplitClip}
+          selectedVideoTrack={selectedVideoTrack}
+          selectedAudioTrack={selectedAudioTrack}
+          videoTrackCount={videoTrackCount}
+          audioTrackCount={audioTrackCount}
+          onChangeSelectedVideoTrack={setSelectedVideoTrack}
+          onChangeSelectedAudioTrack={setSelectedAudioTrack}
+          onAddVideoTrack={() => setVideoTrackCount((v) => v + 1)}
+          onAddAudioTrack={() => setAudioTrackCount((v) => v + 1)}
         />
       </div>
 
+      {/* Full-Width Multi-Track Timeline Deck */}
       <Timeline
         clips={clips}
         media={media}
-        selectedClipId={
-          selectedClipId
-        }
-        currentTime={
-          currentTime
-        }
-        isPlaying={
-          isPlaying
-        }
-        onSelectClip={
-          handleSelectClip
-        }
-        onDeleteClip={
-          handleDeleteClip
-        }
-        onSplitClip={
-          handleSplitClip
-        }
-        onTrimStart={
-          handleTrimStart
-        }
-        onTrimEnd={
-          handleTrimEnd
-        }
-        onMoveClip={
-          handleMoveClip
-        }
-        onTogglePlay={
-          handleTogglePlay
-        }
-        onSeek={
-          handleSeek
-        }
+        selectedClipId={selectedClipId}
+        currentTime={currentTime}
+        isPlaying={isPlaying}
+        timelineZoom={timelineZoom}
+        snapEnabled={snapEnabled}
+        videoTrackCount={videoTrackCount}
+        audioTrackCount={audioTrackCount}
+        selectedVideoTrack={selectedVideoTrack}
+        selectedAudioTrack={selectedAudioTrack}
+        onSelectClip={handleSelectClip}
+        onDeleteClip={handleDeleteClip}
+        onSplitClip={handleSplitClip}
+        onTrimStart={handleTrimStart}
+        onTrimEnd={handleTrimEnd}
+        onMoveClip={handleMoveClip}
+        onDuplicateClip={handleDuplicateClip}
+        onTrimDragBegin={handleTrimDragBegin}
+        onTrimDragUpdate={handleTrimDragUpdate}
+        onReorderClip={handleReorderClip}
+        onUpdateClipStart={handleUpdateClipStart}
+        onUpdateClipTrack={handleUpdateClipTrack}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onFitTimeline={handleFitTimeline}
+        onChangeZoom={handleZoomChange}
+        onToggleSnap={() => setSnapEnabled((v) => !v)}
+        onAddVideoTrack={() => setVideoTrackCount((v) => v + 1)}
+        onAddAudioTrack={() => setAudioTrackCount((v) => v + 1)}
+        onTogglePlay={handleTogglePlay}
+        onSeek={handleSeek}
+        onAddTextPrompt={handleAddTextPrompt}
       />
 
+      {/* Shortcuts Guide Modal */}
+      <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+
+      {/* Project Manager Modal */}
       <ProjectManager
-        open={
-          projectManagerOpen
-        }
-        currentProjectId={
-          currentProject?.id ??
-          null
-        }
-        onOpenProject={
-          handleOpenProject
-        }
-        onClose={() =>
-          setProjectManagerOpen(
-            false,
-          )
-        }
+        open={projectManagerOpen}
+        currentProjectId={currentProject?.id ?? null}
+        onOpenProject={handleOpenProject}
+        onClose={() => setProjectManagerOpen(false)}
       />
 
+      {/* Video Export Dialog */}
       <ExportDialog
         open={isExporting}
         stage={exportStage}
-        progress={
-          exportProgress
-        }
-        error={
-          exportError
-        }
-        onClose={
-          closeExport
-        }
+        progress={exportProgress}
+        error={exportError}
+        onClose={closeExport}
       />
     </main>
   );

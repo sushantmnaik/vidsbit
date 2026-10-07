@@ -46,8 +46,11 @@ The idea is simple:
 * [x] Clip selection
 * [x] Clip deletion
 * [x] Clip reordering
+* [x] Clip duplication
 * [x] Basic trimming
+* [x] Precise trim interactions
 * [x] Clip splitting
+* [x] Timeline zoom
 * [x] Multi-clip timeline
 * [x] Multi-clip export
 * [x] MP4 export
@@ -64,27 +67,23 @@ The idea is simple:
 #### 🎬 Editing
 
 * [ ] Drag-and-drop timeline editing
-* [ ] Precise trim handles
-* [ ] Clip duplication
-* [ ] Timeline zoom
-* [ ] Multiple video tracks
-* [ ] Multiple audio tracks
+* [ ] Multi-track timeline editing
 * [ ] Snap-to-clip editing
 * [ ] Transitions
 * [ ] Picture-in-picture
-* [ ] Text overlays
-* [ ] Text animations
+* [x] Text overlays
+* [x] Text animations
 * [ ] Filters
 * [ ] Crop and resize
 * [ ] Rotation
-* [ ] Speed control
-* [ ] Volume control
+* [x] Speed control
+* [x] Volume control
 
 #### 🎵 Audio
 
 * [ ] Background music
 * [ ] Audio trimming
-* [ ] Fade in / fade out
+* [x] Fade in / fade out
 * [ ] Multiple audio tracks
 * [ ] Local music library
 * [ ] Music search
@@ -95,8 +94,8 @@ The idea is simple:
 #### 🤖 Advanced & AI Features
 
 * [ ] Automatic captions
-* [ ] Custom caption designs
-* [ ] Animated captions
+* [x] Custom caption designs
+* [x] Animated captions
 * [ ] Chroma key / green screen
 * [ ] Video background removal
 * [ ] Image background removal
@@ -109,10 +108,10 @@ The idea is simple:
 * [x] Project folders
 * [x] Local project persistence
 * [x] Automatic saving
+* [x] Storage persistence protection
+* [x] Project import / export (.vidsbit)
+* [x] Full portable project backup with media
 * [ ] Local folder integration
-* [ ] Project import / export
-* [ ] Optional project backup
-* [ ] Full project backup with media
 * [ ] Improved offline support
 
 ---

@@ -16,24 +16,21 @@ function cloneEditorState(
   state: EditorState,
 ): EditorState {
   return {
+    ...state,
     media: [...state.media],
-
-    clips: state.clips.map(
-      (clip) => ({
-        ...clip,
-      }),
-    ),
-
-    selectedClipId:
-      state.selectedClipId,
-
-    currentTime:
-      state.currentTime,
+    clips: state.clips.map((clip) => ({
+      ...clip,
+    })),
+    tracks: state.tracks ? [...state.tracks] : [],
+    texts: state.texts ? [...state.texts] : [],
+    captions: state.captions ? [...state.captions] : [],
+    captionStyle: { ...state.captionStyle },
+    settings: { ...state.settings },
   };
 }
 
 export function useEditorHistory(
-  initialState: EditorState,
+  _initialState?: EditorState,
 ) {
   const [undoStack, setUndoStack] =
     useState<EditorState[]>([]);

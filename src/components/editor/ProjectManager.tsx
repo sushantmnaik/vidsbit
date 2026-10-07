@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   createFolder,
@@ -8,11 +8,15 @@ import {
   deleteFolder,
   deleteProject,
   ensureDefaultFolder,
+  exportProjectBundle,
   getFolders,
   getProjects,
+  importProjectBundle,
   ProjectFolder,
   ProjectSummary,
   renameProject,
+  requestPersistentStorage,
+  StorageHealth,
 } from "@/lib/projectStorage";
 
 interface ProjectManagerProps {
@@ -59,6 +63,11 @@ export default function ProjectManager({
   const [loading, setLoading] =
     useState(false);
 
+  const [storageHealth, setStorageHealth] =
+    useState<StorageHealth | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   async function refresh() {
     const defaultFolder =
       await ensureDefaultFolder();
@@ -66,9 +75,11 @@ export default function ProjectManager({
     const [
       loadedFolders,
       loadedProjects,
+      health,
     ] = await Promise.all([
       getFolders(),
       getProjects(),
+      requestPersistentStorage(),
     ]);
 
     setFolders(
@@ -78,6 +89,8 @@ export default function ProjectManager({
     setProjects(
       loadedProjects,
     );
+
+    setStorageHealth(health);
 
     setSelectedFolderId(
       (current) =>
@@ -91,9 +104,29 @@ export default function ProjectManager({
       return;
     }
 
-    refresh().catch(
-      console.error,
-    );
+    let active = true;
+    (async () => {
+      try {
+        const defaultFolder = await ensureDefaultFolder();
+        const [loadedFolders, loadedProjects, health] = await Promise.all([
+          getFolders(),
+          getProjects(),
+          requestPersistentStorage(),
+        ]);
+        if (active) {
+          setFolders(loadedFolders);
+          setProjects(loadedProjects);
+          setStorageHealth(health);
+          setSelectedFolderId((current) => current ?? defaultFolder.id);
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, [open]);
 
   if (!open) {
@@ -263,6 +296,57 @@ export default function ProjectManager({
     await refresh();
   }
 
+  async function handleExportBundle(project: ProjectSummary) {
+    setLoading(true);
+    try {
+      const { blob, fileName } = await exportProjectBundle(project.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Failed to export project bundle.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleImportFile(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    try {
+      const imported = await importProjectBundle(
+        file,
+        selectedFolderId ?? undefined,
+      );
+      await refresh();
+      onOpenProject(imported);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Failed to import project. Please ensure this is a valid .vidsbit file.",
+      );
+    } finally {
+      setLoading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  }
+
   return (
     <div className="project-manager-overlay">
       <section className="project-manager">
@@ -352,6 +436,29 @@ export default function ProjectManager({
                 </div>
               ),
             )}
+
+            <div className="project-storage-health">
+              <span
+                title={
+                  storageHealth?.persisted
+                    ? "IndexedDB is protected by browser"
+                    : "Browser storage active"
+                }
+              >
+                {storageHealth?.persisted
+                  ? "🛡️ Storage: Protected"
+                  : "💾 Storage: Local"}
+              </span>
+              {storageHealth?.usageBytes !== undefined && (
+                <small>
+                  {Math.round(
+                    storageHealth.usageBytes /
+                      (1024 * 1024),
+                  )}{" "}
+                  MB used
+                </small>
+              )}
+            </div>
           </aside>
 
           <div className="project-list">
@@ -374,17 +481,37 @@ export default function ProjectManager({
                 </span>
               </div>
 
-              <button
-                className="project-new-button"
-                onClick={() => {
-                  setNewName("");
-                  setShowNewProject(
-                    true,
-                  );
-                }}
-              >
-                + New Project
-              </button>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".vidsbit,.zip"
+                  style={{ display: "none" }}
+                  onChange={handleImportFile}
+                />
+                <button
+                  type="button"
+                  className="project-new-button"
+                  onClick={() =>
+                    fileInputRef.current?.click()
+                  }
+                  title="Import a self-contained .vidsbit project bundle"
+                >
+                  📥 Import (.vidsbit)
+                </button>
+
+                <button
+                  className="project-new-button"
+                  onClick={() => {
+                    setNewName("");
+                    setShowNewProject(
+                      true,
+                    );
+                  }}
+                >
+                  + New Project
+                </button>
+              </div>
             </div>
 
             {visibleProjects.length ===
@@ -457,6 +584,17 @@ export default function ProjectManager({
                       </button>
 
                       <div className="project-card-actions">
+                        <button
+                          onClick={() =>
+                            handleExportBundle(
+                              project,
+                            )
+                          }
+                          title="Export standalone .vidsbit backup"
+                        >
+                          Export (.vidsbit)
+                        </button>
+
                         <button
                           onClick={() =>
                             handleRenameProject(
