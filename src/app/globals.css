@@ -3687,3 +3687,180 @@ button:disabled {
   background: rgba(0, 210, 255, 0.25);
   color: #00d2ff;
 }
+
+/* =========================================================
+   ENHANCED TIMELINE INTERACTION STYLES
+   ========================================================= */
+
+.timeline-time-ruler {
+  cursor: pointer;
+  user-select: none;
+}
+
+.timeline-time-ruler:hover {
+  background: #191921;
+}
+
+.capcut-playhead {
+  pointer-events: none;
+}
+
+.playhead-cap {
+  pointer-events: auto !important;
+  cursor: ew-resize;
+  width: 14px;
+  height: 20px;
+  transition: transform 0.1s ease;
+}
+
+.playhead-cap:hover {
+  transform: translateX(-50%) scale(1.2);
+}
+
+.playhead-cap:active {
+  cursor: grabbing;
+}
+
+.playhead-time-badge {
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #00f2fe;
+  color: #000;
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  z-index: 60;
+}
+
+.playhead-hover-needle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  z-index: 35;
+}
+
+.playhead-hover-badge {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+  background: rgba(18, 18, 25, 0.95);
+  color: #cbd5e1;
+  font-family: monospace;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+  z-index: 36;
+}
+
+.snap-guide-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ec4899;
+  box-shadow: 0 0 10px #ec4899;
+  z-index: 45;
+  pointer-events: none;
+}
+
+.snap-guide-badge {
+  position: absolute;
+  top: 28px;
+  transform: translateX(-50%);
+  background: #ec4899;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  z-index: 46;
+}
+
+.timeline-lane.lane-drop-target {
+  background: rgba(0, 242, 254, 0.1) !important;
+  border-color: #00f2fe !important;
+  outline: 1.5px dashed #00f2fe;
+}
+
+.clip-trim-handle {
+  width: 12px;
+  z-index: 20;
+}
+
+.clip-trim-handle::after {
+  content: "";
+  display: block;
+  width: 2px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 1px;
+}
+
+.clip-trim-handle:hover,
+.clip-trim-handle.is-active-trim {
+  background: #00f2fe !important;
+}
+
+.clip-trim-handle:hover::after,
+.clip-trim-handle.is-active-trim::after {
+  background: #000000 !important;
+}
+
+.capcut-clip-card.selected .clip-trim-handle {
+  background: rgba(0, 242, 254, 0.25);
+}
+
+.capcut-clip-card.selected .clip-trim-handle::after {
+  background: #00f2fe;
+}
+
+.clip-trim-tooltip {
+  position: absolute;
+  top: -26px;
+  background: #00f2fe;
+  color: #000;
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  z-index: 60;
+}
+
+.track-mute-btn {
+  background: transparent;
+  border: none;
+  color: var(--capcut-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+}
+
+.track-mute-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.track-mute-btn.is-muted {
+  color: #ef4444;
+}

@@ -242,7 +242,16 @@ export default function MediaPanel({
                 onDrop={handleDrop}
               >
                 {filteredMedia.map((item) => (
-                  <div key={item.id} className="capcut-media-card">
+                  <div
+                    key={item.id}
+                    className="capcut-media-card"
+                    draggable={true}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("mediaId", item.id);
+                      e.dataTransfer.setData("mediaType", item.type);
+                      e.dataTransfer.effectAllowed = "copy";
+                    }}
+                  >
                     <div className="card-thumb">
                       {item.type === "video" ? (
                         <video src={item.url ?? undefined} muted preload="metadata" />

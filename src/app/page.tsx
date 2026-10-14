@@ -757,6 +757,9 @@ useEffect(() => {
     useCallback(
       (
         mediaId: string,
+        customStartTime?: number,
+        customTrack?: number,
+        customTrackKind?: "video" | "audio",
       ) => {
         const item =
           media.find(
@@ -776,37 +779,29 @@ useEffect(() => {
               ? DEFAULT_IMAGE_DURATION
               : 5;
 
-        const timelineEnd =
-          clips.reduce(
-            (
-              max,
-              clip,
-            ) =>
-              Math.max(
-                max,
-                clip.timelineStart +
-                  (clip.sourceEnd -
-                    clip.sourceStart),
-              ),
-            0,
-          );
+        const isAudioItem = customTrackKind
+          ? customTrackKind === "audio"
+          : item.type === "audio";
 
-        const isAudioItem = item.type === "audio";
-        const targetTrack = isAudioItem
-          ? Math.min(
-              selectedAudioTrack,
-              Math.max(0, audioTrackCount - 1),
-            )
-          : Math.min(
-              selectedVideoTrack,
-              Math.max(0, videoTrackCount - 1),
-            );
+        let targetTrack: number;
+        if (customTrack !== undefined && customTrack >= 0) {
+          targetTrack = customTrack;
+        } else {
+          targetTrack = isAudioItem
+            ? Math.min(
+                selectedAudioTrack,
+                Math.max(0, audioTrackCount - 1),
+              )
+            : Math.min(
+                selectedVideoTrack,
+                Math.max(0, videoTrackCount - 1),
+              );
+        }
 
-        // Multi-track layer placement:
-        // - Overlay tracks (track > 0) or audio: start at current playhead position
-        // - Main video track (track 0): append to existing track 0 clips, or place at playhead
         let startPosition = 0;
-        if (targetTrack > 0 || isAudioItem) {
+        if (customStartTime !== undefined && Number.isFinite(customStartTime) && customStartTime >= 0) {
+          startPosition = Math.max(0, Math.round(customStartTime * 100) / 100);
+        } else if (targetTrack > 0 || isAudioItem) {
           startPosition = Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0;
         } else {
           const track0Clips = clips.filter(
@@ -852,7 +847,7 @@ useEffect(() => {
             videoBackgroundRemoval: "none",
             imageBackgroundRemoval: "none",
             advancedEffect: "none",
-            pictureInPicture: targetTrack > 0,
+            pictureInPicture: targetTrack > 0 && !isAudioItem,
             fadeIn: 0,
             fadeOut: 0,
             audioTrimStart: 0,
@@ -1331,29 +1326,16 @@ useEffect(() => {
             return clip;
           }
 
-          const sourceDuration =
-            Math.max(0.1, clip.sourceEnd - clip.sourceStart);
-          const adjustedDelta =
-            handle === "start" ? deltaSeconds : -deltaSeconds;
-          const nextStart =
-            handle === "start"
-              ? Math.min(
-                  clip.sourceEnd - 0.1,
-                  clip.sourceStart + adjustedDelta,
-                )
-              : clip.sourceStart;
-          const nextEnd =
-            handle === "end"
-              ? Math.max(
-                  clip.sourceStart + 0.1,
-                  clip.sourceEnd + adjustedDelta,
-                )
-              : clip.sourceEnd;
+          const sourceMedia = media.find((m) => m.id === clip.mediaId);
+          const maxSourceDuration =
+            sourceMedia?.duration && sourceMedia.duration > 0
+              ? sourceMedia.duration
+              : 3600;
 
           if (handle === "start") {
             const nextStartVal = Math.min(
               clip.sourceEnd - 0.1,
-              Math.max(0, nextStart),
+              Math.max(0, clip.sourceStart + deltaSeconds),
             );
             const actualDelta = nextStartVal - clip.sourceStart;
             return {
@@ -1363,17 +1345,14 @@ useEffect(() => {
             };
           }
 
-          const endValue = Math.max(
+          const nextEndVal = Math.max(
             clip.sourceStart + 0.1,
-            Math.min(
-              clip.sourceStart + sourceDuration + 2,
-              nextEnd,
-            ),
+            Math.min(maxSourceDuration, clip.sourceEnd + deltaSeconds),
           );
 
           return {
             ...clip,
-            sourceEnd: endValue,
+            sourceEnd: nextEndVal,
           };
         }),
       ),
@@ -1456,55 +1435,31 @@ useEffect(() => {
         return;
       }
 
-      const relative =
-        currentTime -
-        clip.timelineStart;
+      const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+      const duration = Math.max(0.1, (clip.sourceEnd - clip.sourceStart) / speed);
+      const relative = currentTime - clip.timelineStart;
 
-      const duration =
-        Math.max(
-          0.1,
-          clip.sourceEnd -
-            clip.sourceStart,
-        );
-
-      let splitOffset = relative;
-      if (
-        splitOffset <= 0.05 ||
-        splitOffset >= duration - 0.05
-      ) {
-        splitOffset = duration / 2;
+      let splitTimelineOffset = relative;
+      if (splitTimelineOffset <= 0.05 || splitTimelineOffset >= duration - 0.05) {
+        splitTimelineOffset = duration / 2;
       }
 
-      record(
-        getEditorState(),
-      );
+      record(getEditorState());
 
-      const split =
-        clip.sourceStart +
-        splitOffset;
+      const splitSource = clip.sourceStart + splitTimelineOffset * speed;
 
       const first = {
         ...clip,
-        id:
-          `clip-${Date.now()}-a-${Math.random()
-            .toString(36)
-            .slice(2)}`,
-        sourceEnd:
-          split,
-        timelineStart:
-          clip.timelineStart,
+        id: `clip-${Date.now()}-a-${Math.random().toString(36).slice(2)}`,
+        sourceEnd: splitSource,
+        timelineStart: clip.timelineStart,
       };
 
       const second = {
         ...clip,
-        id:
-          `clip-${Date.now()}-b-${Math.random()
-            .toString(36)
-            .slice(2)}`,
-        sourceStart:
-          split,
-        timelineStart:
-          clip.timelineStart + splitOffset,
+        id: `clip-${Date.now()}-b-${Math.random().toString(36).slice(2)}`,
+        sourceStart: splitSource,
+        timelineStart: clip.timelineStart + splitTimelineOffset,
       };
 
       const index =
@@ -1593,6 +1548,32 @@ useEffect(() => {
           };
         }),
       );
+    },
+    [getEditorState, record],
+  );
+
+  const handleToggleTrackMute = useCallback(
+    (trackIndex: number, trackKind: "video" | "audio") => {
+      record(getEditorState());
+      setClips((prev) => {
+        const trackClips = prev.filter(
+          (c) =>
+            (c.trackKind === trackKind ||
+              (trackKind === "video" && c.trackKind !== "audio")) &&
+            (c.track ?? 0) === trackIndex,
+        );
+        const anyUnmuted = trackClips.some((c) => !c.muted);
+        return prev.map((c) => {
+          const isThisTrack =
+            (c.trackKind === trackKind ||
+              (trackKind === "video" && c.trackKind !== "audio")) &&
+            (c.track ?? 0) === trackIndex;
+          if (isThisTrack) {
+            return { ...c, muted: anyUnmuted };
+          }
+          return c;
+        });
+      });
     },
     [getEditorState, record],
   );
@@ -2602,6 +2583,8 @@ useEffect(() => {
         onTogglePlay={handleTogglePlay}
         onSeek={handleSeek}
         onAddTextPrompt={handleAddTextPrompt}
+        onAddToTimeline={handleAddToTimeline}
+        onToggleTrackMute={handleToggleTrackMute}
       />
 
       {/* Shortcuts Guide Modal */}
